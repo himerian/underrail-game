@@ -48,6 +48,7 @@ minetest.register_node("underrail:ur_metal_crate", {
     groups = {cracky = 3, stone = 2},
     paramtype2 = "facedir", -- faced to the player when set
 })
+
 minetest.register_node("underrail:blue_cave_mushroom", {
     description = "Blue Cave Mushroom",
     tiles = {"blue_cave_mushroom.png"},
@@ -65,6 +66,7 @@ minetest.register_node("underrail:blue_cave_mushroom", {
         fixed = {-4 / 16, -0.5, -4 / 16, 4 / 16, -1 / 16, 4 / 16},
     }
 })
+
 minetest.register_node("underrail:ur_brown_crate", {
     description = "Brown Crate",
     tiles = {
@@ -73,6 +75,7 @@ minetest.register_node("underrail:ur_brown_crate", {
     is_ground_content = false,
     groups = {cracky = 3, stone = 2},
 })
+
 minetest.register_node("underrail:floor_locker", {
     drawtype = "nodebox",
     description = "Floor Locker",
