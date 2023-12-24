@@ -1,45 +1,50 @@
+local SWITCH
+
 i3.new_tab("test1", {
 	description = "Test 1 Test 1",
 	image = "i3_heart.png",
 
 	formspec = function(player, data, fs)
-		fs("label[3,1;Test 1]")
+		fs("button", 3, 4, 3, 0.8, "test", "Click here")
+		fs("label", 3, 1, "Just a test")
+		
+
+		if SWITCH then
+			fs"label[3,2;Button clicked]"
+		else
+			fs"label[3,2;Lorem Ipsum]"
+		end
 	end,
+
+	fields = function(player, data, fields)
+		if fields.test then
+			SWITCH = true
+		end
+	end
 })
 
 i3.new_tab("test2", {
 	description = "Test 2",
 	image = "i3_mesepick.png",
+	slots = true,
 
 	formspec = function(player, data, fs)
 		fs("label[3,1;Test 2]")
 	end,
 })
 
-i3.new_tab("test3", {
-	description = "Test 3",
+i3.new_tab("test_creative", {
+	description = "Test creative",
 
 	access = function(player, data)
 		local name = player:get_player_name()
-		if name == "singleplayer" then
-			return true
-		end
+		return core.is_creative_enabled(name)
 	end,
 
 	formspec = function(player, data, fs)
-		fs("label[3,1;Test 3]")
+		fs("label[3,1;Creative enabled]")
 	end,
 
-	fields = function(player, data, fields)
-		i3.set_fs(player, "label[3,2;Test extra_fs]")
-	end,
+	fields = i3.set_fs,
 })
 
-i3.override_tab("test2", {
-	description = "Test override",
-	image = "i3_mesepick.png",
-
-	formspec = function(player, data, fs)
-		fs("label[3,1;Override!]")
-	end,
-})

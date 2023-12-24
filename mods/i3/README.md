@@ -1,13 +1,13 @@
 ![logo](https://user-images.githubusercontent.com/7883281/145490041-d91d6bd6-a654-438d-b208-4d5736845ab7.png)
 
-[![MIT License](https://img.shields.io/apm/l/atomic-design-ui.svg?)](https://github.com/tterb/atomic-design-ui/blob/master/LICENSEs) [![GitHub Release](https://img.shields.io/github/release/minetest-mods/i3.svg?style=flat)]() ![workflow](https://github.com/minetest-mods/i3/actions/workflows/luacheck.yml/badge.svg) [![ContentDB](https://content.minetest.net/packages/jp/i3/shields/downloads/)](https://content.minetest.net/packages/jp/i3/) [![PayPal](https://img.shields.io/badge/paypal-donate-yellow.svg)](https://www.paypal.me/jpg84240)
+[![GitHub Release](https://img.shields.io/github/release/minetest-mods/i3.svg?style=flat)]() ![workflow](https://github.com/minetest-mods/i3/actions/workflows/luacheck.yml/badge.svg) [![ContentDB](https://content.minetest.net/packages/jp/i3/shields/downloads/)](https://content.minetest.net/packages/jp/i3/) [![PayPal](https://img.shields.io/badge/paypal-donate-yellow.svg)](https://www.paypal.me/jpg84240)
 
 #### **`i3`** is a next-generation inventory for Minetest.
 
 This mod features a modern, powerful inventory menu with a good user experience.
 **`i3`** provides a rich [**API**](https://github.com/minetest-mods/i3/blob/master/API.md) for mod developers who want to extend it.
 
-This mod requires **Minetest 5.4+**
+This mod requires **Minetest 5.6+**
 
 #### List of features:
    - Crafting Guide (survival mode only)
@@ -35,13 +35,14 @@ To enable it: `i3_progressive_mode = true` in `minetest.conf`.*
 To use this mod in the best conditions:
 
    - Use LuaJIT
-   - Use a HiDPI widescreen display
    - Use the default Freetype font style
 
 #### Troubleshooting
 
 If the inventory's font size is too big on certain setups (namely Windows 10/11 or 144 DPI display), you should lower the
 value of the setting `display_density_factor` in your `minetest.conf`. Note that the change is applied after restart.
+
+You can also use the font size slider in the inventory, settings window. 
 
 #### Notes
 
@@ -53,4 +54,4 @@ Report bugs on the [**Bug Tracker**](https://github.com/minetest-mods/i3/issues)
 
 **Video review on YouTube:** https://www.youtube.com/watch?v=Xd14BCdEZ3o
 
-![Preview](https://user-images.githubusercontent.com/7883281/144105848-535b5e4f-a6fc-44d6-add1-e62a45d36f63.png)
+![Preview](https://user-images.githubusercontent.com/7883281/185755315-23c2fffa-203d-4115-9dc3-576c92615733.png)

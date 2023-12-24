@@ -1,10 +1,10 @@
-local make_fs = i3.files.gui()
 local http = ...
+local make_fs, get_inventory_fs = i3.files.gui()
 
-IMPORT("gmatch", "split")
-IMPORT("S", "err", "fmt", "reg_items")
-IMPORT("sorter", "sort_inventory")
+IMPORT("sorter", "sort_inventory", "play_sound")
 IMPORT("sort", "concat", "copy", "insert", "remove")
+IMPORT("get_player_by_name", "add_hud_waypoint", "init_hud_notif")
+IMPORT("gmatch", "split", "S", "err", "fmt", "reg_items", "pos_to_str")
 IMPORT("true_str", "true_table", "is_str", "is_func", "is_table", "clean_name")
 
 function i3.register_craft_type(name, def)
@@ -22,7 +22,7 @@ end
 function i3.register_craft(def)
 	local width, c = 0, 0
 
-	if true_str(def.url) then
+	if http and true_str(def.url) then
 		http.fetch({url = def.url}, function(result)
 			if result.succeeded then
 				local t = core.parse_json(result.data)
@@ -51,7 +51,7 @@ function i3.register_craft(def)
 		def.result = nil
 	end
 
-	if not true_str(def.output) then
+	if not true_str(def.output) and not def.url then
 		return err "i3.register_craft: output missing"
 	end
 
@@ -69,9 +69,7 @@ function i3.register_craft(def)
 		end
 
 		local cp = copy(def.grid)
-		sort(cp, function(a, b)
-			return #a > #b
-		end)
+		sort(cp, function(a, b) return #a > #b end)
 
 		width = #cp[1]
 
@@ -86,26 +84,29 @@ function i3.register_craft(def)
 			def.items[c] = def.key[symbol]
 		end
 	else
-		local items, len = def.items, #def.items
+		local items = copy(def.items)
+		local lines = {}
 		def.items = {}
 
-		for i = 1, len do
-			local rlen = #split(items[i], ",")
+		for i = 1, #items do
+			lines[i] = split(items[i], ",", true)
 
-			if rlen > width then
-				width = rlen
+			if #lines[i] > width then
+				width = #lines[i]
 			end
 		end
 
-		for i = 1, len do
-			while #split(items[i], ",") < width do
-				items[i] = fmt("%s,", items[i])
+		for i = 1, #items do
+			while #lines[i] < width do
+				insert(lines[i], items[i])
 			end
 		end
 
-		for name in gmatch(concat(items, ","), "[%s%w_:]+") do
-			c++
-			def.items[c] = clean_name(name)
+		for _, line in ipairs(lines) do
+			for _, v in ipairs(line) do
+				c++
+				def.items[c] = clean_name(v)
+			end
 		end
 	end
 
@@ -166,6 +167,13 @@ function i3.set_fs(player)
 		sort_inventory(player, data)
 	end
 
+	for i, tab in ipairs(i3.tabs) do
+		if data.tab == i and tab.access and not tab.access(player, data) then
+			data.tab = 1
+			break
+		end
+	end
+
 	local fs = make_fs(player, data)
 	player:set_inventory_formspec(fs)
 end
@@ -185,15 +193,21 @@ function i3.new_tab(name, def)
 	insert(i3.tabs, def)
 end
 
+i3.new_tab("inventory", {
+	description = S"Inventory",
+	formspec = get_inventory_fs,
+	slots = true,
+})
+
 function i3.remove_tab(name)
 	if not true_str(name) then
 		return err "i3.remove_tab: tab name missing"
 	end
 
-	for i, def in ipairs(i3.tabs) do
-		if name == def.name then
+	for i = #i3.tabs, 2, -1 do
+		local def = i3.tabs[i]
+		if def and name == def.name then
 			remove(i3.tabs, i)
-			break
 		end
 	end
 end
@@ -214,8 +228,8 @@ function i3.set_tab(player, tabname)
 		return
 	end
 
-	for i, def in ipairs(i3.tabs) do
-		if def.name == tabname then
+	for i, tab in ipairs(i3.tabs) do
+		if tab.name == tabname then
 			data.tab = i
 			return
 		end
@@ -301,16 +315,34 @@ function i3.hud_notif(name, msg, img)
 	end
 
 	local data = i3.data[name]
-
 	if not data then
 		return err "i3.hud_notif: no player data initialized"
 	end
 
-	data.show_hud = true
-	data.hud_msg = msg
+	local player = get_player_by_name(name)
+	if not player then return end
+	local max_y = -125
 
-	if img then
-		data.hud_img = fmt("%s^[resize:16x16", img)
+	local def = {
+		show = true,
+		max = {x = -330, y = max_y},
+		hud_msg = msg,
+		hud_img = img and fmt("%s^[resize:64x64", img) or nil,
+		hud_timer = 0,
+		elems = init_hud_notif(player),
+	}
+
+	insert(data.hud.notifs, def)
+	play_sound(name, "i3_achievement", 1.0)
+
+	local nb_notifs = #data.hud.notifs
+	for i = 1, nb_notifs - 1 do
+		local notif = data.hud.notifs[i]
+		if notif then
+			notif.show = true
+			notif.max.y = ((nb_notifs - i) + 1) * max_y
+			notif.hud_timer = 0.5 * (nb_notifs - i)
+		end
 	end
 end
 
@@ -330,7 +362,7 @@ end
 i3.add_sorting_method("alphabetical", {
 	description = S"Sort items by name (A-Z)",
 	func = function(list, data)
-		sorter(list, data.reverse_sorting, 1)
+		sorter(list, data, 1)
 		return list
 	end
 })
@@ -338,7 +370,130 @@ i3.add_sorting_method("alphabetical", {
 i3.add_sorting_method("numerical", {
 	description = S"Sort items by number of items per stack",
 	func = function(list, data)
-		sorter(list, data.reverse_sorting, 2)
+		sorter(list, data, 2)
 		return list
 	end,
+})
+
+function i3.add_waypoint(name, def)
+	if not true_str(name) then
+		return err "i3.add_waypoint: name missing"
+	elseif not true_table(def) then
+		return err "i3.add_waypoint: definition missing"
+	elseif not true_str(def.player) then
+		return err "i3.add_waypoint: player name missing"
+	end
+
+	local data = i3.data[def.player]
+	if not data then
+		return err "i3.add_waypoint: no player data initialized"
+	end
+
+	local player = get_player_by_name(def.player)
+	local id = player and add_hud_waypoint(player, name, def.pos, def.color, def.image) or nil
+
+	insert(data.waypoints, {
+		name  = name,
+		pos   = pos_to_str(def.pos, 1),
+		color = def.color,
+		image = def.image,
+		id    = id,
+	})
+
+	if data.subcat == 5 then
+		data.scrbar_inv += 1000
+	end
+
+	i3.set_fs(player)
+end
+
+function i3.remove_waypoint(player_name, name)
+	if not true_str(player_name) then
+		return err "i3.remove_waypoint: player name missing"
+	elseif not true_str(name) then
+		return err "i3.remove_waypoint: waypoint name missing"
+	end
+
+	local data = i3.data[player_name]
+	if not data then
+		return err "i3.remove_waypoint: no player data initialized"
+	end
+
+	local player = get_player_by_name(player_name)
+
+	for i = #data.waypoints, 1, -1 do
+		local waypoint = data.waypoints[i]
+		if waypoint and name == waypoint.name then
+			if player then
+				player:hud_remove(waypoint.id)
+			end
+
+			remove(data.waypoints, i)
+		end
+	end
+
+	i3.set_fs(player)
+end
+
+function i3.get_waypoints(player_name)
+	if not true_str(player_name) then
+		return err "i3.get_waypoints: player name missing"
+	end
+
+	local data = i3.data[player_name]
+	if not data then
+		return err "i3.get_waypoints: no player data initialized"
+	end
+
+	return data.waypoints
+end
+
+function i3.new_minitab(name, def)
+	if #i3.minitabs == 6 then
+		return err "i3.new_minitab: limit reached (6)"
+	elseif not true_str(name) then
+		return err "i3.new_minitab: name missing"
+	elseif not true_table(def) then
+		return err "i3.new_minitab: definition missing"
+	end
+
+	def.name = name
+	insert(i3.minitabs, def)
+end
+
+function i3.remove_minitab(name)
+	if not true_str(name) then
+		return err "i3.remove_minitab: name missing"
+	end
+
+	for i = #i3.minitabs, 2, -1 do
+		local v = i3.minitabs[i]
+		if v and v.name == name then
+			remove(i3.minitabs, i)
+		end
+	end
+end
+
+i3.new_minitab("all", {
+	description = "All",
+
+	sorter = function()
+		return true
+	end
+})
+
+i3.new_minitab("nodes", {
+	description = "Nodes",
+
+	sorter = function(item)
+		return core.registered_nodes[item]
+	end
+})
+
+i3.new_minitab("items", {
+	description = "Items",
+
+	sorter = function(item)
+		return core.registered_craftitems[item] or core.registered_tools[item]
+	end
 })

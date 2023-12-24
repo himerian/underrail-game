@@ -2,11 +2,22 @@ local set_fs = i3.set_fs
 local hud_notif = i3.hud_notif
 local POLL_FREQ = 0.25
 
-IMPORT("fmt", "search", "table_merge", "array_diff")
-IMPORT("is_group", "extract_groups", "item_has_groups", "apply_recipe_filters")
+IMPORT("reg_items", "reg_nodes", "fmt", "table_merge", "array_diff")
+IMPORT("is_group", "extract_groups", "item_has_groups", "apply_recipe_filters", "sort_by_category")
+
+i3.remove_minitab"nodes"
+i3.remove_minitab"items"
+
+i3.new_minitab("unlocked", {
+	description = "Unlocked",
+
+	sorter = function(item, data)
+		return data.items_progress[item]
+	end
+})
 
 local function get_filtered_items(player, data)
-	local items, known, c = {}, 0, 0
+	local items, known = {}, 0
 
 	for i = 1, #i3.init_items do
 		local item = i3.init_items[i]
@@ -17,8 +28,7 @@ local function get_filtered_items(player, data)
 		usages = #apply_recipe_filters(usages or {}, player)
 
 		if recipes > 0 or usages > 0 then
-			c++
-			items[c] = item
+			items[item] = true
 			known += recipes + usages
 		end
 	end
@@ -32,7 +42,9 @@ local function item_in_inv(item, inv_items)
 	local inv_items_size = #inv_items
 
 	if is_group(item) then
-		local groups = extract_groups(item)
+		local groupname = item:sub(7)
+		local group_cache = i3.groups[groupname]
+		local groups = group_cache and group_cache.groups or extract_groups(item)
 
 		for i = 1, inv_items_size do
 			local def = core.registered_items[inv_items[i]]
@@ -89,6 +101,10 @@ local item_lists = {"main", "craft", "craftpreview"}
 
 local function get_inv_items(player)
 	local inv = player:get_inventory()
+	if not inv then
+		return {}
+	end
+
 	local stacks = {}
 
 	for i = 1, #item_lists do
@@ -127,13 +143,20 @@ local function poll_new_items(player, data, join)
 
 		if data.discovered > 0 then
 			local msg = fmt("%u new recipe%s unlocked!", data.discovered, data.discovered > 1 and "s" or "")
-			hud_notif(data.player_name, msg, "i3_book.png")
+			local last_discovered = diff[1]
+			local img = reg_items[last_discovered].inventory_image
+
+			if reg_nodes[last_discovered] then
+				local id = core.get_content_id(last_discovered)
+				img = i3.cubes[id] or img
+			end
+
+			hud_notif(data.player_name, msg, img)
 		end
 
-		data.items_raw = items
-		data.itab = 1
+		data.items_progress = items
 
-		search(data)
+		sort_by_category(data)
 		set_fs(player)
 	end
 

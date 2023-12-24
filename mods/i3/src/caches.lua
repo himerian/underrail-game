@@ -1,11 +1,10 @@
-local PNG = i3.files.styles()
 local replacements = {fuel = {}}
 local http = ...
 
-IMPORT("maxn", "copy", "insert", "sort", "match", "sub")
-IMPORT("is_group", "extract_groups", "item_has_groups", "groups_to_items")
-IMPORT("fmt", "reg_items", "reg_aliases", "reg_nodes", "draw_cube", "ItemStack")
-IMPORT("true_str", "true_table", "is_table", "valid_item", "table_merge", "table_replace", "rcp_eq")
+IMPORT("copy", "insert", "sort", "match", "sub")
+IMPORT("true_str", "is_table", "valid_item", "table_merge", "table_replace", "table_eq")
+IMPORT("fmt", "reg_items", "reg_aliases", "reg_nodes", "is_cube", "get_cube", "ItemStack")
+IMPORT("is_group", "extract_groups", "item_has_groups", "groups_to_items", "get_group_stereotype")
 
 local function get_burntime(item)
 	return core.get_craft_result{method = "fuel", items = {item}}.time
@@ -23,10 +22,55 @@ local function cache_fuel(item)
 	end
 end
 
-local function get_item_usages(item, recipe, added)
-	local groups = extract_groups(item)
+local function cache_groups(group, groups)
+	i3.groups[group] = {}
+	i3.groups[group].groups = groups
+	i3.groups[group].items = groups_to_items(groups)
 
-	if groups then
+	if #groups == 1 then
+		i3.groups[group].stereotype = get_group_stereotype(groups[1])
+	end
+
+	local items = i3.groups[group].items
+	if #items <= 1 then return end
+
+	local px, lim, c = 64, 10, 0
+	local sprite = "[combine:WxH"
+
+	for _, item in ipairs(items) do
+		local def = reg_items[item]
+		local tiles = def.tiles or def.tile_images
+		local texture = true_str(def.inventory_image) and def.inventory_image --or tiles[1]
+
+		if def.drawtype and is_cube(def.drawtype) then
+			texture = get_cube(tiles)
+		end
+
+		if texture then
+			texture = texture:gsub("%^", "\\^"):gsub(":", "\\:") .. fmt("\\^[resize\\:%ux%u", px, px)
+			sprite = sprite .. fmt(":0,%u=%s", c * px, texture)
+			c++
+			if c == lim then break end
+		end
+	end
+
+	if c > 1 then
+		sprite = sprite:gsub("WxH", px .. "x" .. px * c)
+		i3.groups[group].sprite = sprite
+		i3.groups[group].count = c
+	end
+end
+
+local function get_item_usages(item, recipe, added)
+	if is_group(item) then
+		local group = item:sub(7)
+		local group_cache = i3.groups[group]
+		local groups = group_cache and group_cache.groups or extract_groups(item)
+
+		if not group_cache then
+			cache_groups(group, groups)
+		end
+
 		for name, def in pairs(reg_items) do
 			if not added[name] and valid_item(def) and item_has_groups(def.groups, groups) then
 				local usage = copy(recipe)
@@ -134,17 +178,7 @@ local function cache_recipes(item)
 			_recipes[#recipes + 1 - k] = v
 		end
 
-		local shift = 0
-		local size_rpl = maxn(replacements[item])
-		local size_rcp = #_recipes
-
-		if size_rpl > size_rcp then
-			shift = size_rcp - size_rpl
-		end
-
 		for k, v in pairs(replacements[item]) do
-			k += shift
-
 			if _recipes[k] then
 				_recipes[k].replacements = v
 			end
@@ -181,7 +215,7 @@ core.register_craft = function(def)
 
 	if is_group(output[1]) then
 		groups = extract_groups(output[1])
-		output = groups_to_items(groups, true)
+		output = groups_to_items(groups)
 	end
 
 	for i = 1, #output do
@@ -204,11 +238,7 @@ local old_clear_craft = core.clear_craft
 core.clear_craft = function(def)
 	old_clear_craft(def)
 
-	if true_str(def) then
-		return -- TODO
-	elseif is_table(def) then
-		return -- TODO
-	end
+	-- TODO: hide in crafting guide
 end
 
 local function resolve_aliases(hash)
@@ -230,7 +260,7 @@ local function resolve_aliases(hash)
 					local rcp_new = copy(i3.recipes_cache[newname][j])
 					      rcp_new.output = oldname
 
-					if rcp_eq(rcp_old, rcp_new) then
+					if table_eq(rcp_old, rcp_new) then
 						similar = true
 						break
 					end
@@ -242,7 +272,7 @@ local function resolve_aliases(hash)
 			end
 		end
 
-		if newname ~= "" and i3.recipes_cache[oldname] and not hash[newname] then
+		if newname ~= "" and i3.recipes_cache[oldname] and reg_items[newname] and not hash[newname] then
 			insert(i3.init_items, newname)
 		end
 	end
@@ -284,40 +314,20 @@ local function init_recipes()
 	end
 end
 
-local function get_cube(tiles)
-	if not true_table(tiles) then
-		return PNG.blank
-	end
-
-	local top = tiles[1] or PNG.blank
-	if is_table(top) then
-		top = top.name or top.image
-	end
-
-	local left = tiles[3] or top or PNG.blank
-	if is_table(left) then
-		left = left.name or left.image
-	end
-
-	local right = tiles[5] or left or PNG.blank
-	if is_table(right) then
-		right = right.name or right.image
-	end
-
-	return draw_cube(top, left, right)
-end
-
 local function init_cubes()
 	for name, def in pairs(reg_nodes) do
 		if def then
 			local id = core.get_content_id(name)
+			local tiles = def.tiles or def.tile_images
 
-			if def.drawtype == "normal" or def.drawtype == "liquid" or
-					sub(def.drawtype, 1, 9) == "glasslike" or
-					sub(def.drawtype, 1, 8) == "allfaces" then
-				i3.cubes[id] = get_cube(def.tiles)
+			if is_cube(def.drawtype) then
+				i3.cubes[id] = get_cube(tiles)
 			elseif sub(def.drawtype, 1, 9) == "plantlike" or sub(def.drawtype, 1, 8) == "firelike" then
-				i3.plants[id] = def.inventory_image .. "^\\[resize:16x16"
+				local texture = true_str(def.inventory_image) and def.inventory_image or tiles[1]
+
+				if texture then
+					i3.plants[id] = texture
+				end
 			end
 		end
 	end

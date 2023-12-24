@@ -10,6 +10,7 @@ read_globals = {
 	"armor",
 	"skins",
 	"awards",
+	"hb",
 	"vector",
 	"string",
 	"table",
@@ -30,6 +31,7 @@ exclude_files = {
 	"tests/test_custom_recipes.lua",
 	"tests/test_operators.lua",
 	"tests/test_tabs.lua",
+	"tests/test_waypoints.lua",
 
 	".install",
 	".luarocks",

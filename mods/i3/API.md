@@ -1,6 +1,19 @@
-## API
+# API :screwdriver:
 
-### Custom tabs
+### Table of Contents
+1. [**Tabs**](https://github.com/minetest-mods/i3/blob/main/API.md#tabs)
+2. [**Recipes**](https://github.com/minetest-mods/i3/blob/main/API.md#recipes)
+3. [**Minitabs**](https://github.com/minetest-mods/i3/blob/main/API.md#minitabs)
+4. [**Recipe filters**](https://github.com/minetest-mods/i3/blob/main/API.md#recipe-filters)
+5. [**Search filters**](https://github.com/minetest-mods/i3/blob/main/API.md#search-filters)
+6. [**Sorting methods**](https://github.com/minetest-mods/i3/blob/main/API.md#sorting-methods)
+7. [**Item list compression**](https://github.com/minetest-mods/i3/blob/main/API.md#item-list-compression)
+8. [**Waypoints**](https://github.com/minetest-mods/i3/blob/main/API.md#waypoints)
+9. [**Miscellaneous**](https://github.com/minetest-mods/i3/blob/main/API.md#miscellaneous)
+
+---
+
+### Tabs
 
 #### `i3.new_tab(name, def)`
 
@@ -12,51 +25,62 @@ Custom tabs can be added to the `i3` inventory as follow (example):
 ```Lua
 i3.new_tab("stuff", {
 	description = "Stuff",
-	image = "image.png", -- Optional, adds an image next to the tab description
+	image = "image.png", -- Optional, add an image next to the tab description
+	slots = true -- Optional, whether the inventory slots are shown or not. Disabled by default.
 
-	-- Determine if the tab is visible by a player, `false` or `nil` hide the tab
+	--
+	-- The functions below are all optional
+	--
+
+	-- Determine if the tab is visible by a player, return false to hide the tab
 	access = function(player, data)
 		local name = player:get_player_name()
-		if name == "singleplayer" then
-			return false
-		end
+		return name == "singleplayer"
 	end,
 
+	-- Build the formspec
 	formspec = function(player, data, fs)
-		fs("label[3,1;This is just a test]")
+		fs("label", 3, 1, "Just a test")
+		fs"label[3,2;Lorem Ipsum]"
+		-- No need to return anything
 	end,
 
 	-- Events handling happens here
 	fields = function(player, data, fields)
-		
+		if fields.mybutton then
+			-- Do things
+		end
+
+		-- To prevent a formspec update, return false.
+		-- Otherwise: no need to return anything, it's automatic.
 	end,
 })
 ```
 
 - `player` is an `ObjectRef` to the user.
 - `data` are the user data.
-- `fs` is the formspec table which is callable with a metamethod. Each call adds a new entry.
+- `fs` is the formspec table which is callable with a metamethod. Every call adds a new entry.
 
 #### `i3.set_fs(player)`
 
-Updates the current formspec.
+Update the current formspec.
 
 #### `i3.remove_tab(tabname)`
 
-Deletes a tab by name.
+Delete a tab by name.
 
 #### `i3.get_current_tab(player)`
 
-Returns the current player tab. `player` is an `ObjectRef` to the user.
+Return the current player tab. `player` is an `ObjectRef` to the user.
 
 #### `i3.set_tab(player[, tabname])`
 
-Sets the current tab by name. `player` is an `ObjectRef` to the user.
+Set the current tab by name. `player` is an `ObjectRef` to the user.
 `tabname` can be omitted to get an empty tab.
 
 #### `i3.override_tab(tabname, def)`
 
-Overrides a tab by name. `def` is the tab definition like seen in `i3.set_tab`.
+Override a tab by name. `def` is the tab definition like seen in `i3.set_tab`
 
 #### `i3.tabs`
 
@@ -64,15 +88,17 @@ A list of registered tabs.
 
 ---
 
-### Custom recipes
+### Recipes
 
 Custom recipes are nonconventional crafts outside the main crafting grid.
 They can be registered in-game dynamically and have a size beyond 3x3 items.
 
 **Note:** the registration format differs from the default registration format in everything.
-The width is automatically calculated depending where you place the commas. Look at the examples attentively.
+The width is automatically calculated depending where you place the commas.
 
-#### Registering a custom crafting type (example)
+Examples:
+
+#### Registering a custom crafting type
 
 ```Lua
 i3.register_craft_type("digging", {
@@ -81,7 +107,7 @@ i3.register_craft_type("digging", {
 })
 ```
 
-#### Registering a custom crafting recipe (examples)
+#### Registering a custom crafting recipe
 
 ```Lua
 i3.register_craft {
@@ -120,7 +146,7 @@ i3.register_craft {
 }
 ```
 
-Multiples recipes can also be registered:
+Multiple recipes can also be registered at once:
 
 ```Lua
 i3.register_craft {
@@ -154,6 +180,53 @@ i3.register_craft {
 
 ---
 
+### Minitabs
+
+Manage the tabs on the right panel of the inventory.
+Allow to make a sensible list sorted by specific groups of items.
+
+#### `i3.new_minitab(name, def)`
+
+Add a new minitab (limited to 6).
+
+- `name` is the tab name.
+- `def` is the definition table.
+
+Example:
+
+```Lua
+i3.new_minitab("test", {
+	description = "Test",
+
+	-- Whether this tab is visible or not. Optional.
+	access = function(player, data)
+		return player:get_player_name() == "singleplayer"
+	end,
+
+	-- Whether a specific item is shown in the list or not.
+	sorter = function(item, data)
+		return item:find"wood"
+	end
+})
+
+```
+
+- `player` is an `ObjectRef` to the user.
+- `data` are the user data.
+- `item` is an item name string.
+
+#### `i3.remove_minitab(name)`
+
+Remove a minitab by name.
+
+- `name` is the name of the tab to remove.
+
+#### `i3.minitabs`
+
+A list of registered minitabs.
+
+---
+
 ### Recipe filters
 
 Recipe filters can be used to filter the recipes shown to players. Progressive
@@ -161,7 +234,7 @@ mode is implemented as a recipe filter.
 
 #### `i3.add_recipe_filter(name, function(recipes, player))`
 
-Adds a recipe filter with the given `name`. The filter function returns the
+Add a recipe filter with the given `name`. The filter function returns the
 recipes to be displayed, given the available recipes and an `ObjectRef` to the
 user. Each recipe is a table of the form returned by
 `minetest.get_craft_recipe`.
@@ -183,7 +256,7 @@ end)
 
 #### `i3.set_recipe_filter(name, function(recipe, player))`
 
-Removes all recipe filters and adds a new one.
+Remove all recipe filters and add a new one.
 
 #### `i3.recipe_filters`
 
@@ -209,7 +282,7 @@ Notes:
 
 #### `i3.add_search_filter(name, function(item, values))`
 
-Adds a search filter.
+Add a search filter.
 The search function must return a boolean value (whether the given item should be listed or not).
 
 - `name` is the filter name.
@@ -243,7 +316,7 @@ Sorting methods are used to filter the player's main inventory.
 
 #### `i3.add_sorting_method(name, def)`
 
-Adds a player inventory sorting method.
+Add a player inventory sorting method.
 
 - `name` is the method name.
 - `def` is the method definition.
@@ -278,9 +351,9 @@ A table containing all sorting methods.
 
 #### `i3.compress(item, def)`
 
-Adds a new group of items to compress.
+Add a new group of items to compress.
 
-- `item` is the item that serve as stereotype for the group of compressed items.
+- `item` is the item which represent the group of compressed items.
 - `def` is a table specifying the substring replace patterns to be used.
 
 Example:
@@ -299,11 +372,54 @@ A map of all compressed item groups, indexed by stereotypes.
 
 ---
 
+### Waypoints
+
+`i3` allows you to manage the waypoints of a specific player.
+
+#### `i3.add_waypoint(player_name, def)`
+
+Add a waypoint to specific player.
+
+- `player_name` is the player name.
+- `def` is the waypoint definition table.
+
+Example:
+
+```Lua
+i3.add_waypoint("Test", {
+	player = "singleplayer",
+	pos = {x = 0, y = 2, z = 0},
+	color = 0xffff00,
+--	image = "heart.png" (optional)
+})
+```
+
+#### `i3.remove_waypoint(player_name, waypoint_name)`
+
+Remove a waypoint for specific player.
+
+- `player_name` is the player name.
+- `waypoint_name` is the waypoint name.
+
+Example:
+
+```Lua
+i3.remove_waypoint("singleplayer", "Test")
+```
+
+#### `i3.get_waypoints(player_name)`
+
+Return a table of all waypoints of a specific player.
+
+- `player_name` is the player name.
+
+---
+
 ### Miscellaneous
 
 #### `i3.hud_notif(name, msg[, img])`
 
-Shows a Steam-like HUD notification on the bottom-right corner of the screen (experimental).
+Show a Steam-like HUD notification on the bottom-left corner of the screen.
 
 - `name` is the player name.
 - `msg` is the HUD message to show.
@@ -311,7 +427,7 @@ Shows a Steam-like HUD notification on the bottom-right corner of the screen (ex
 
 #### `i3.get_recipes(item)`
 
-Returns a table of recipes and usages of `item`.
+Return a table of recipes and usages of `item`.
 
 #### `i3.export_url`
 
@@ -325,4 +441,4 @@ given a number between 1 and 4.
 
 ---
 
-**¹** Add `i3` to the `secure.http_mods` or `secure.trusted_mods` setting in `minetest.conf`.
+**[1]** Add `i3` to the `secure.http_mods` or `secure.trusted_mods` setting in `minetest.conf`.

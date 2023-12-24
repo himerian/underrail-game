@@ -1,13 +1,21 @@
+local vec = vector.new
 local ItemStack = ItemStack
 local loadstring = loadstring
 local reg_items = core.registered_items
 local translate = core.get_translated_string
-local vec_new, vec_add, vec_mul = vector.new, vector.add, vector.multiply
 local sort, concat, insert = table.sort, table.concat, table.insert
 local min, floor, ceil = math.min, math.floor, math.ceil
 local fmt, find, match, gmatch, sub, split, lower, upper =
 	string.format, string.find, string.match, string.gmatch,
 	string.sub, string.split, string.lower, string.upper
+
+if not core.registered_privileges.creative then
+	core.register_privilege("creative", {
+		description = "Allow player to use creative inventory",
+		give_to_singleplayer = false,
+		give_to_admin = false,
+	})
+end
 
 local old_is_creative_enabled = core.is_creative_enabled
 
@@ -69,6 +77,16 @@ local function toupper(str)
 	return str:gsub("%f[%w]%l", upper):gsub("_", " ")
 end
 
+local function utf8_len(str)
+	local c = 0
+
+	for _ in str:gmatch"[%z\1-\127\194-\244][\128-\191]*" do -- Arguably working duct-tape code
+		c++
+	end
+
+	return c
+end
+
 local function get_bag_description(data, stack)
 	local desc = translate(data.lang_code, stack:get_description())
 	      desc = split(desc, "(")[1] or desc
@@ -101,7 +119,7 @@ local function search(data)
 	for i = 1, #data.items_raw do
 		local item = data.items_raw[i]
 		local def = reg_items[item]
-		local desc = lower(translate(data.lang_code, def and def.description)) or ""
+		local desc = lower(translate(data.lang_code, def.description)) or ""
 		local search_in = fmt("%s %s", item, desc)
 		local temp, j, to_add = {}, 1
 
@@ -198,18 +216,22 @@ local function array_diff(t1, t2)
 	return diff
 end
 
-local function rcp_eq(rcp, rcp2)
-	if rcp.type   ~= rcp2.type   then return end
-	if rcp.width  ~= rcp2.width  then return end
-	if #rcp.items ~= #rcp2.items then return end
-	if rcp.output ~= rcp2.output then return end
+local function table_eq(t1, t2)
+	local ty1, ty2 = type(t1), type(t2)
+	if ty1 ~= ty2 then return end
 
-	for i, item in pairs(rcp.items) do
-		if item ~= rcp2.items[i] then return end
+	if ty1 ~= "table" and ty2 ~= "table" then
+		return t1 == t2
 	end
 
-	for i, item in pairs(rcp2.items) do
-		if item ~= rcp.items[i] then return end
+	for k, v in pairs(t1) do
+		local v2 = t2[k]
+		if v2 == nil or not table_eq(v, v2) then return end
+	end
+
+	for k, v in pairs(t2) do
+		local v1 = t1[k]
+		if v1 == nil or not table_eq(v1, v) then return end
 	end
 
 	return true
@@ -228,9 +250,7 @@ local function is_group(item)
 end
 
 local function extract_groups(str)
-	if sub(str, 1, 6) == "group:" then
-		return split(sub(str, 7), ",")
-	end
+	return split(sub(str, 7), ",")
 end
 
 local function item_has_groups(item_groups, groups)
@@ -247,30 +267,56 @@ local function valid_item(def)
 		def.description and def.description ~= ""
 end
 
-local function groups_to_items(groups, get_all)
-	if not get_all and #groups == 1 then
-		local group = groups[1]
-		local stereotype = i3.group_stereotypes[group]
-		local def = reg_items[stereotype]
+local function get_group_stereotype(group)
+	local stereotype = i3.group_stereotypes[group]
+	local def = reg_items[stereotype]
 
-		if valid_item(def) then
-			return stereotype
-		end
+	if valid_item(def) then
+		return stereotype
 	end
+end
 
+local function groups_to_items(groups)
 	local names = {}
 
 	for name, def in pairs(reg_items) do
 		if valid_item(def) and item_has_groups(def.groups, groups) then
-			if get_all then
-				insert(names, name)
-			else
-				return name
-			end
+			insert(names, name)
 		end
 	end
 
-	return get_all and names or ""
+	sort(names)
+
+	return names
+end
+
+local function is_cube(drawtype)
+	return drawtype == "normal" or drawtype == "liquid" or
+		sub(drawtype, 1, 9) == "glasslike" or
+		sub(drawtype, 1, 8) == "allfaces"
+end
+
+local function get_cube(tiles)
+	if not true_table(tiles) then
+		return "i3_blank.png"
+	end
+
+	local top = tiles[1] or "i3_blank.png"
+	if is_table(top) then
+		top = top.name or top.image
+	end
+
+	local left = tiles[3] or top or "i3_blank.png"
+	if is_table(left) then
+		left = left.name or left.image
+	end
+
+	local right = tiles[5] or left or "i3_blank.png"
+	if is_table(right) then
+		right = right.name or right.image
+	end
+
+	return core.inventorycube(top, left, right)
 end
 
 local function apply_recipe_filters(recipes, player)
@@ -281,25 +327,24 @@ local function apply_recipe_filters(recipes, player)
 	return recipes
 end
 
+local function recipe_filter_set()
+	return next(i3.recipe_filters)
+end
+
 local function compression_active(data)
-	return i3.settings.item_compression and not next(i3.recipe_filters) and data.filter == ""
+	return data.collapse and not recipe_filter_set() and data.filter == ""
 end
 
 local function compressible(item, data)
 	return compression_active(data) and i3.compress_groups[item]
 end
 
-local function is_fav(favs, query_item)
-	local fav, i
-	for j = 1, #favs do
-		if favs[j] == query_item then
-			fav = true
-			i = j
-			break
+local function is_fav(data)
+	for i = 1, #data.favs do
+		if data.favs[i] == data.query_item then
+			return i
 		end
 	end
-
-	return fav, i
 end
 
 local function sort_by_category(data)
@@ -315,13 +360,8 @@ local function sort_by_category(data)
 
 	for i = 1, #items do
 		local item = items[i]
-		local to_add = true
-
-		if data.itab == 2 then
-			to_add = core.registered_nodes[item]
-		elseif data.itab == 3 then
-			to_add = core.registered_craftitems[item] or core.registered_tools[item]
-		end
+		local tab = i3.minitabs[data.itab]
+		local to_add = tab.sorter(item, data)
 
 		if to_add then
 			insert(new, item)
@@ -335,7 +375,7 @@ local function spawn_item(player, stack)
 	local dir     = player:get_look_dir()
 	local ppos    = player:get_pos()
 	      ppos.y  = ppos.y + player:get_properties().eye_height
-	local look_at = vec_add(ppos, vec_mul(dir, 1))
+	local look_at = ppos + dir
 
 	core.add_item(look_at, stack)
 end
@@ -368,38 +408,61 @@ local function get_stack(player, stack)
 	end
 end
 
+local function get_group_items(name)
+	local groups = extract_groups(name)
+	return i3.groups[name:sub(7)].items or groups_to_items(groups)
+end
+
 local function craft_stack(player, data, craft_rcp)
 	local inv = player:get_inventory()
 	local rcp_usg = craft_rcp and "recipe" or "usage"
+	local rcp_def = rcp_usg == "recipe" and data.recipes[data.rnum] or data.usages[data.unum]
 	local output = craft_rcp and data.recipes[data.rnum].output or data.usages[data.unum].output
 	      output = ItemStack(output)
 	local stackname, stackcount, stackmax = output:get_name(), output:get_count(), output:get_stack_max()
 	local scrbar_val = data[fmt("scrbar_%s", craft_rcp and "rcp" or "usg")] or 1
 
-	for name, count in pairs(data.export_counts[rcp_usg].rcp) do
+	for name, count in pairs(data.crafting_counts[rcp_usg].rcp) do
 		local items = {[name] = count}
 
 		if is_group(name) then
 			items = {}
-			local groups = extract_groups(name)
-			local item_groups = groups_to_items(groups, true)
+			local item_groups = get_group_items(name)
 			local remaining = count
 
 			for _, item in ipairs(item_groups) do
-			for _name, _count in pairs(data.export_counts[rcp_usg].inv) do
-				if item == _name and remaining > 0 then
-					local c = min(remaining, _count)
-					items[item] = c
-					remaining -= c
-				end
+				for _name, _count in pairs(data.crafting_counts[rcp_usg].inv) do
+					if item == _name and remaining > 0 then
+						local c = min(remaining, _count)
+						items[item] = c
+						remaining -= c
+					end
 
-				if remaining == 0 then break end
-			end
+					if remaining == 0 then break end
+				end
 			end
 		end
 
-		for k, v in pairs(items) do
-			inv:remove_item("main", fmt("%s %s", k, v * scrbar_val))
+		for item, v in pairs(items) do
+			for _ = 1, v * scrbar_val do
+				inv:remove_item("main", item)
+
+				for _, pair in ipairs(rcp_def.replacements or {}) do
+					local old_name, new_name = unpack(pair)
+
+					if is_group(old_name) then
+						local item_groups = get_group_items(old_name)
+
+						for _, it in ipairs(item_groups) do
+							if item == it then
+								get_stack(player, ItemStack(new_name))
+							end
+						end
+					elseif item == old_name then
+						get_stack(player, ItemStack(new_name))
+					end
+				end
+			end
 		end
 	end
 
@@ -424,35 +487,24 @@ local function safe_teleport(player, pos)
 	play_sound(name, "i3_teleport", 0.8)
 
 	local vel = player:get_velocity()
-	player:add_velocity(vec_mul(vel, -1))
+	player:add_velocity(-vel)
 
-	local p = vec_new(pos)
+	local p = vec(pos)
 	      p.y += 0.25
 
 	player:set_pos(p)
 end
 
-local function get_sorting_idx(name)
-	local idx = 1
-
-	for i, def in ipairs(i3.sorting_methods) do
-		if name == def.name then
-			idx = i
-		end
-	end
-
-	return idx
-end
-
-local function sorter(inv, reverse, mode)
+local function sorter(inv, data, mode)
 	sort(inv, function(a, b)
 		if mode == 1 then
-			a, b = a:get_name(), b:get_name()
+			a = translate(data.lang_code, a:get_short_description())
+			b = translate(data.lang_code, b:get_short_description())
 		else
 			a, b = a:get_count(), b:get_count()
 		end
 
-		if reverse then
+		if data.reverse_sorting then
 			return a > b
 		end
 
@@ -519,40 +571,15 @@ local function compress_items(list, start_i)
 	return new_inv
 end
 
-local function drop_items(player, inv, list, start_i, rej)
-	for i = start_i, #list do
-		local stack = list[i]
-		local name = stack:get_name()
-
-		for _, it in ipairs(rej) do
-			if name == it then
-				spawn_item(player, stack)
-				inv:set_stack("main", i, ItemStack(""))
-			end
-		end
-	end
-
-	return inv:get_list"main"
-end
-
 local function sort_inventory(player, data)
 	local inv = player:get_inventory()
 	local list = inv:get_list"main"
 	local size = inv:get_size"main"
-	local start_i = data.ignore_hotbar and (i3.settings.hotbar_len + 1) or 1
+	local start_i = data.ignore_hotbar and (data.hotbar_len + 1) or 1
 
-	if true_table(data.drop_items) then
-		list = drop_items(player, inv, list, start_i, data.drop_items)
-	end
+	list = data.inv_compress and compress_items(list, start_i) or pre_sorting(list, start_i)
 
-	if data.inv_compress then
-		list = compress_items(list, start_i)
-	else
-		list = pre_sorting(list, start_i)
-	end
-
-	local idx = get_sorting_idx(data.sort)
-	local new_inv = i3.sorting_methods[idx].func(list, data)
+	local new_inv = i3.sorting_methods[data.sort].func(list, data)
 	if not new_inv then return end
 
 	if not data.ignore_hotbar then
@@ -566,14 +593,77 @@ local function sort_inventory(player, data)
 	end
 end
 
-local function add_hud_waypoint(player, name, pos, color)
+local function reset_data(data)
+	data.filter        = ""
+	data.expand        = ""
+	data.pagenum       = 1
+	data.rnum          = 1
+	data.unum          = 1
+	data.scrbar_rcp    = 1
+	data.scrbar_usg    = 1
+	data.query_item    = nil
+	data.enable_search = nil
+	data.goto_page     = nil
+	data.recipes       = nil
+	data.usages        = nil
+	data.crafting_rcp  = nil
+	data.crafting_usg  = nil
+	data.alt_items     = nil
+	data.confirm_trash = nil
+	data.show_settings = nil
+	data.show_setting  = "home"
+	data.items         = data.items_raw
+
+	if data.itab > 1 then
+		sort_by_category(data)
+	end
+end
+
+local function add_hud_waypoint(player, name, pos, color, image)
 	return player:hud_add {
-		hud_elem_type = "waypoint",
+		hud_elem_type = image and "image_waypoint" or "waypoint",
 		name = name,
-		text = " m",
+		text = image or "m",
+		scale = {x = 5, y = 5},
 		world_pos = pos,
 		number = color,
+		image = image,
 		z_index = -300,
+	}
+end
+
+local function init_hud_notif(player)
+	return {
+		bg = player:hud_add {
+			hud_elem_type = "image",
+			position      = {x = 0,   y = 1},
+			offset        = {x = 10,  y = 0},
+			alignment     = {x = 1,   y = 1},
+			scale         = {x = 0.6, y = 0.6},
+			text          = "i3_bg_notif.png",
+			z_index       = 0xDEAD,
+		},
+
+		img = player:hud_add {
+			hud_elem_type = "image",
+			position      = {x = 0,  y = 1},
+			offset        = {x = 20, y = 20},
+			alignment     = {x = 1,  y = 1},
+			scale         = {x = 1,  y = 1},
+			text          = "",
+			z_index       = 0xDEAD,
+		},
+
+		text = player:hud_add {
+			hud_elem_type = "text",
+			position      = {x = 0,   y = 1},
+			offset        = {x = 100, y = 40},
+			alignment     = {x = 1,   y = 1},
+			number        = 0xffffff,
+			text          = "",
+			z_index       = 0xDEAD,
+			style         = 1,
+		}
 	}
 end
 
@@ -582,6 +672,20 @@ local function get_detached_inv(name, player_name)
 		type = "detached",
 		name = fmt("i3_%s_%s", name, player_name)
 	}
+end
+
+local function update_inv_size(player, data)
+	data.hotbar_len = data.legacy_inventory and 8 or 9
+	data.inv_size = 4 * data.hotbar_len
+
+	local inv = player:get_inventory()
+	inv:set_size("main", data.inv_size)
+
+	player:hud_set_hotbar_itemcount(data.hotbar_len)
+
+	core.after(0, function()
+		player:hud_set_hotbar_image(data.legacy_inventory and "gui_hotbar.png" or "i3_hotbar.png")
+	end)
 end
 
 -- Much faster implementation of `unpack`
@@ -611,6 +715,7 @@ local _ = {
 	extract_groups = extract_groups,
 	item_has_groups = item_has_groups,
 	groups_to_items = groups_to_items,
+	get_group_stereotype = get_group_stereotype,
 
 	-- Compression
 	compressible = compressible,
@@ -621,8 +726,8 @@ local _ = {
 	sorter = sorter,
 	get_recipes = get_recipes,
 	sort_inventory = sort_inventory,
-	get_sorting_idx = get_sorting_idx,
 	sort_by_category = sort_by_category,
+	recipe_filter_set = recipe_filter_set,
 	apply_recipe_filters = apply_recipe_filters,
 
 	-- Type checks
@@ -638,12 +743,16 @@ local _ = {
 	msg = msg,
 
 	-- Misc. functions
+	is_cube = is_cube,
+	get_cube = get_cube,
 	ItemStack = ItemStack,
 	valid_item = valid_item,
 	spawn_item = spawn_item,
 	clean_name = clean_name,
 	play_sound = play_sound,
+	reset_data = reset_data,
 	safe_teleport = safe_teleport,
+	init_hud_notif = init_hud_notif,
 	add_hud_waypoint = add_hud_waypoint,
 
 	-- Core functions
@@ -662,6 +771,7 @@ local _ = {
 	-- Inventory
 	get_stack = get_stack,
 	craft_stack = craft_stack,
+	update_inv_size = update_inv_size,
 	get_detached_inv = get_detached_inv,
 	get_bag_description = get_bag_description,
 	create_inventory = core.create_detached_inventory,
@@ -689,6 +799,7 @@ local _ = {
 	match = string.match,
 	gmatch = string.gmatch,
 	toupper = toupper,
+	utf8_len = utf8_len,
 
 	-- Table
 	maxn = table.maxn,
@@ -702,11 +813,12 @@ local _ = {
 	is_table = is_table,
 	table_merge = table_merge,
 	table_replace = table_replace,
-	rcp_eq = rcp_eq,
+	table_eq = table_eq,
 	array_diff = array_diff,
 
 	-- Math
 	round = round,
+	abs = math.abs,
 	min = math.min,
 	max = math.max,
 	ceil = math.ceil,
@@ -714,12 +826,8 @@ local _ = {
 	random = math.random,
 
 	-- Vectors
-	vec_new = vector.new,
-	vec_add = vector.add,
-	vec_sub = vector.subtract,
-	vec_mul = vector.multiply,
+	vec = vector.new,
 	vec_round = vector.round,
-	vec_eq = vector.equals,
 }
 
 function i3.get(...)
